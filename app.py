@@ -1,5 +1,5 @@
 import torch
-from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
+from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image, AutoPipelineForInpainting
 from diffusers.utils import load_image
 import gradio as gr
 import os
@@ -35,14 +35,28 @@ def load_models():
         pag_applied_layers=["mid"]
     )
     
+    # Initialize inpainting pipeline
+    pipeline_sdxl_inpaint = AutoPipelineForInpainting.from_pretrained(
+        "stabilityai/stable-diffusion-xl-base-1.0",
+        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
+    )
+    
+    # Create PAG-enabled inpainting pipeline
+    pipeline_inpaint = AutoPipelineForInpainting.from_pipe(
+        pipeline_sdxl_inpaint,
+        enable_pag=True,
+        pag_applied_layers=["mid"]
+    )
+    
     if device.type == "cuda":
         pipeline_text2img.enable_model_cpu_offload()
         pipeline_img2img.enable_model_cpu_offload()
+        pipeline_inpaint.enable_model_cpu_offload()
     
-    return pipeline_text2img, pipeline_img2img
+    return pipeline_text2img, pipeline_img2img, pipeline_inpaint
 
 # Load the models
-pipeline_text2img, pipeline_img2img = load_models()
+pipeline_text2img, pipeline_img2img, pipeline_inpaint = load_models()
 
 def generate_text2image(prompt, pag_scale, guidance_scale, num_inference_steps, seed):
     # Set the seed for reproducibility
@@ -68,6 +82,24 @@ def generate_image2image(prompt, init_image, strength, pag_scale, guidance_scale
         prompt=prompt,
         image=init_image,
         strength=strength,
+        guidance_scale=guidance_scale,
+        pag_scale=pag_scale,
+        generator=generator,
+    ).images
+    
+    return images[0]
+
+def generate_inpainting(prompt, init_image, mask_image, strength, pag_scale, guidance_scale, num_inference_steps, seed):
+    # Set the seed for reproducibility
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    
+    # Generate the image
+    images = pipeline_inpaint(
+        prompt=prompt,
+        image=init_image,
+        mask_image=mask_image,
+        strength=strength,
+        num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
         pag_scale=pag_scale,
         generator=generator,
@@ -196,6 +228,88 @@ with gr.Blocks(title="PAG Image Generator") as demo:
                     0
                 ]],
                 inputs=[prompt_img2img, init_image, strength, pag_scale_img2img, guidance_scale_img2img, seed_img2img]
+            )
+        
+        with gr.TabItem("Inpainting"):
+            with gr.Row():
+                with gr.Column():
+                    prompt_inpaint = gr.Textbox(
+                        label="Prompt",
+                        placeholder="Enter your prompt here...",
+                        value="A majestic tiger sitting on a bench"
+                    )
+                    init_image_inpaint = gr.Image(
+                        label="Input Image",
+                        type="pil"
+                    )
+                    mask_image = gr.Image(
+                        label="Mask Image",
+                        type="pil"
+                    )
+                    strength_inpaint = gr.Slider(
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=0.8,
+                        step=0.1,
+                        label="Strength"
+                    )
+                    pag_scale_inpaint = gr.Slider(
+                        minimum=0.0,
+                        maximum=5.0,
+                        value=3.0,
+                        step=0.1,
+                        label="PAG Scale"
+                    )
+                    guidance_scale_inpaint = gr.Slider(
+                        minimum=1.0,
+                        maximum=20.0,
+                        value=7.5,
+                        step=0.1,
+                        label="Guidance Scale"
+                    )
+                    num_inference_steps_inpaint = gr.Slider(
+                        minimum=1,
+                        maximum=100,
+                        value=50,
+                        step=1,
+                        label="Number of Inference Steps"
+                    )
+                    seed_inpaint = gr.Number(
+                        value=1,
+                        label="Seed",
+                        precision=0
+                    )
+                    generate_inpaint_btn = gr.Button("Generate Image")
+                
+                with gr.Column():
+                    output_image_inpaint = gr.Image(label="Generated Image")
+            
+            # Set up the generation function
+            generate_inpaint_btn.click(
+                fn=generate_inpainting,
+                inputs=[
+                    prompt_inpaint, init_image_inpaint, mask_image, strength_inpaint,
+                    pag_scale_inpaint, guidance_scale_inpaint, num_inference_steps_inpaint, seed_inpaint
+                ],
+                outputs=output_image_inpaint
+            )
+            
+            # Add example
+            gr.Examples(
+                examples=[[
+                    "A majestic tiger sitting on a bench",
+                    "https://raw.githubusercontent.com/CompVis/latent-diffusion/main/data/inpainting_examples/overture-creations-5sI6fQgYIuo.png",
+                    "https://raw.githubusercontent.com/CompVis/latent-diffusion/main/data/inpainting_examples/overture-creations-5sI6fQgYIuo_mask.png",
+                    0.8,
+                    3.0,
+                    7.5,
+                    50,
+                    1
+                ]],
+                inputs=[
+                    prompt_inpaint, init_image_inpaint, mask_image, strength_inpaint,
+                    pag_scale_inpaint, guidance_scale_inpaint, num_inference_steps_inpaint, seed_inpaint
+                ]
             )
 
 if __name__ == "__main__":
