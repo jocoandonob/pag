@@ -16,21 +16,30 @@ This application uses Stable Diffusion XL with Prompt-Aware Guidance (PAG) to ge
 pip install -r requirements.txt
 ```
 
+**If you want to use GPU acceleration (CUDA), install torch with CUDA support before installing other requirements:**
+```bash
+pip install torch==2.1.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+```
+Then install the rest:
+```bash
+pip install -r requirements.txt
+```
+
 ## Usage
 
 Run the script with the default prompt:
 ```bash
-python generate_images.py
+python app.py
 ```
 
 The script will:
 1. Download the Stable Diffusion XL model (if not already downloaded)
-2. Generate images with different PAG scales (0.0 and 3.0)
-3. Save the generated images in the `output` directory
+2. Provide a Gradio web interface with multiple tabs (Text2Image, Image2Image, Inpainting, ControlNet)
+3. Save the generated images in the `output` directory (if you add saving functionality)
 
 ## Customization
 
-You can modify the `generate_images.py` script to:
+You can modify the `app.py` script to:
 - Change the prompt
 - Adjust PAG scales
 - Modify generation parameters (steps, guidance scale, etc.)
@@ -38,6 +47,4 @@ You can modify the `generate_images.py` script to:
 
 ## Output
 
-The generated images will be saved in the `output` directory with filenames indicating their PAG scale:
-- `image_pag_0.0_0.png`: Image generated with PAG scale 0.0
-- `image_pag_3.0_0.png`: Image generated with PAG scale 3.0 
+The generated images will be displayed in the Gradio interface and can be saved manually from the UI. 
