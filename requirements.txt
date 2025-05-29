@@ -1,0 +1,9 @@
+torch==2.1.0+cu118
+numpy==1.24.3
+diffusers==0.24.0
+transformers==4.36.2
+accelerate==0.25.0
+huggingface_hub==0.19.4
+safetensors==0.4.0
+gradio==3.50.2
+pillow>=9.0.0 
