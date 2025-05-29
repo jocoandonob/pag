@@ -1,68 +1,37 @@
 import torch
-from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image, AutoPipelineForInpainting
+from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image, AutoPipelineForInpainting, ControlNetModel
 from diffusers.utils import load_image
 import gradio as gr
 import os
 
-# Initialize the pipelines
-def load_models():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    
-    # Initialize text2image pipeline
-    pipeline_sdxl_text2img = AutoPipelineForText2Image.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
-    )
-    
-    # Create PAG-enabled text2image pipeline
-    pipeline_text2img = AutoPipelineForText2Image.from_pipe(
-        pipeline_sdxl_text2img,
-        enable_pag=True,
-        pag_applied_layers=["mid"]
-    )
-    
-    # Initialize image2image pipeline
-    pipeline_sdxl_img2img = AutoPipelineForImage2Image.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
-    )
-    
-    # Create PAG-enabled image2image pipeline
-    pipeline_img2img = AutoPipelineForImage2Image.from_pipe(
-        pipeline_sdxl_img2img,
-        enable_pag=True,
-        pag_applied_layers=["mid"]
-    )
-    
-    # Initialize inpainting pipeline
-    pipeline_sdxl_inpaint = AutoPipelineForInpainting.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32
-    )
-    
-    # Create PAG-enabled inpainting pipeline
-    pipeline_inpaint = AutoPipelineForInpainting.from_pipe(
-        pipeline_sdxl_inpaint,
-        enable_pag=True,
-        pag_applied_layers=["mid"]
-    )
-    
-    if device.type == "cuda":
-        pipeline_text2img.enable_model_cpu_offload()
-        pipeline_img2img.enable_model_cpu_offload()
-        pipeline_inpaint.enable_model_cpu_offload()
-    
-    return pipeline_text2img, pipeline_img2img, pipeline_inpaint
+# Global pipeline caches
+pipeline_text2img = None
+pipeline_img2img = None
+pipeline_inpaint = None
+pipeline_controlnet = None
 
-# Load the models
-pipeline_text2img, pipeline_img2img, pipeline_inpaint = load_models()
+def get_device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def get_dtype(device):
+    return torch.float16 if device.type == "cuda" else torch.float32
 
 def generate_text2image(prompt, pag_scale, guidance_scale, num_inference_steps, seed):
-    # Set the seed for reproducibility
+    global pipeline_text2img
+    if pipeline_text2img is None:
+        device = get_device()
+        pipeline_sdxl_text2img = AutoPipelineForText2Image.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            torch_dtype=get_dtype(device)
+        )
+        pipeline_text2img = AutoPipelineForText2Image.from_pipe(
+            pipeline_sdxl_text2img,
+            enable_pag=True,
+            pag_applied_layers=["mid"]
+        )
+        if device.type == "cuda":
+            pipeline_text2img.enable_model_cpu_offload()
     generator = torch.Generator(device="cpu").manual_seed(seed)
-    
-    # Generate the image
     images = pipeline_text2img(
         prompt=prompt,
         num_inference_steps=num_inference_steps,
@@ -70,14 +39,24 @@ def generate_text2image(prompt, pag_scale, guidance_scale, num_inference_steps, 
         generator=generator,
         pag_scale=pag_scale,
     ).images
-    
     return images[0]
 
 def generate_image2image(prompt, init_image, strength, pag_scale, guidance_scale, seed):
-    # Set the seed for reproducibility
+    global pipeline_img2img
+    if pipeline_img2img is None:
+        device = get_device()
+        pipeline_sdxl_img2img = AutoPipelineForImage2Image.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            torch_dtype=get_dtype(device)
+        )
+        pipeline_img2img = AutoPipelineForImage2Image.from_pipe(
+            pipeline_sdxl_img2img,
+            enable_pag=True,
+            pag_applied_layers=["mid"]
+        )
+        if device.type == "cuda":
+            pipeline_img2img.enable_model_cpu_offload()
     generator = torch.Generator(device="cpu").manual_seed(seed)
-    
-    # Generate the image
     images = pipeline_img2img(
         prompt=prompt,
         image=init_image,
@@ -86,14 +65,24 @@ def generate_image2image(prompt, init_image, strength, pag_scale, guidance_scale
         pag_scale=pag_scale,
         generator=generator,
     ).images
-    
     return images[0]
 
 def generate_inpainting(prompt, init_image, mask_image, strength, pag_scale, guidance_scale, num_inference_steps, seed):
-    # Set the seed for reproducibility
+    global pipeline_inpaint
+    if pipeline_inpaint is None:
+        device = get_device()
+        pipeline_sdxl_inpaint = AutoPipelineForInpainting.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            torch_dtype=get_dtype(device)
+        )
+        pipeline_inpaint = AutoPipelineForInpainting.from_pipe(
+            pipeline_sdxl_inpaint,
+            enable_pag=True,
+            pag_applied_layers=["mid"]
+        )
+        if device.type == "cuda":
+            pipeline_inpaint.enable_model_cpu_offload()
     generator = torch.Generator(device="cpu").manual_seed(seed)
-    
-    # Generate the image
     images = pipeline_inpaint(
         prompt=prompt,
         image=init_image,
@@ -104,7 +93,38 @@ def generate_inpainting(prompt, init_image, mask_image, strength, pag_scale, gui
         pag_scale=pag_scale,
         generator=generator,
     ).images
-    
+    return images[0]
+
+def generate_controlnet(prompt, control_image, controlnet_scale, pag_scale, guidance_scale, num_inference_steps, seed):
+    global pipeline_controlnet
+    if pipeline_controlnet is None:
+        device = get_device()
+        controlnet = ControlNetModel.from_pretrained(
+            "diffusers/controlnet-canny-sdxl-1.0",
+            torch_dtype=get_dtype(device)
+        )
+        pipeline_sdxl_controlnet = AutoPipelineForText2Image.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            controlnet=controlnet,
+            torch_dtype=get_dtype(device)
+        )
+        pipeline_controlnet = AutoPipelineForText2Image.from_pipe(
+            pipeline_sdxl_controlnet,
+            enable_pag=True,
+            pag_applied_layers=["mid"]
+        )
+        if device.type == "cuda":
+            pipeline_controlnet.enable_model_cpu_offload()
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    images = pipeline_controlnet(
+        prompt=prompt,
+        image=control_image,
+        controlnet_conditioning_scale=controlnet_scale,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        pag_scale=pag_scale,
+        generator=generator,
+    ).images
     return images[0]
 
 # Create the Gradio interface
@@ -309,6 +329,80 @@ with gr.Blocks(title="PAG Image Generator") as demo:
                 inputs=[
                     prompt_inpaint, init_image_inpaint, mask_image, strength_inpaint,
                     pag_scale_inpaint, guidance_scale_inpaint, num_inference_steps_inpaint, seed_inpaint
+                ]
+            )
+        
+        with gr.TabItem("ControlNet"):
+            with gr.Row():
+                with gr.Column():
+                    prompt_controlnet = gr.Textbox(
+                        label="Prompt",
+                        placeholder="Enter your prompt here...",
+                        value=""
+                    )
+                    control_image = gr.Image(
+                        label="Control Image (Canny Edge)",
+                        type="pil"
+                    )
+                    controlnet_scale = gr.Slider(
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=0.5,
+                        step=0.1,
+                        label="ControlNet Scale"
+                    )
+                    pag_scale_controlnet = gr.Slider(
+                        minimum=0.0,
+                        maximum=5.0,
+                        value=3.0,
+                        step=0.1,
+                        label="PAG Scale"
+                    )
+                    guidance_scale_controlnet = gr.Slider(
+                        minimum=0.0,
+                        maximum=20.0,
+                        value=0.0,
+                        step=0.1,
+                        label="Guidance Scale"
+                    )
+                    num_inference_steps_controlnet = gr.Slider(
+                        minimum=1,
+                        maximum=100,
+                        value=50,
+                        step=1,
+                        label="Number of Inference Steps"
+                    )
+                    seed_controlnet = gr.Number(
+                        value=1,
+                        label="Seed",
+                        precision=0
+                    )
+                    generate_controlnet_btn = gr.Button("Generate Image")
+                with gr.Column():
+                    output_image_controlnet = gr.Image(label="Generated Image")
+            generate_controlnet_btn.click(
+                fn=generate_controlnet,
+                inputs=[
+                    prompt_controlnet, control_image, controlnet_scale,
+                    pag_scale_controlnet, guidance_scale_controlnet,
+                    num_inference_steps_controlnet, seed_controlnet
+                ],
+                outputs=output_image_controlnet
+            )
+            gr.Examples(
+                examples=[[
+                    "",
+                    "https://huggingface.co/datasets/YiYiXu/testing-images/resolve/main/pag_control_input.png",
+                    0.5,
+                    3.0,
+                    0.0,
+                    50,
+                    1
+                ]],
+                inputs=[
+                    prompt_controlnet, control_image, controlnet_scale,
+                    pag_scale_controlnet, guidance_scale_controlnet,
+                    num_inference_steps_controlnet, seed_controlnet
                 ]
             )
 
