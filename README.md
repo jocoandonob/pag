@@ -1,3 +1,5 @@
+![PAG Image Generator Thumbnail](thumbnail.png)
+
 # Stable Diffusion XL with PAG Image Generator
 
 This application uses Stable Diffusion XL with Prompt-Aware Guidance (PAG) to generate images. It demonstrates the effect of different PAG scales on image generation.
