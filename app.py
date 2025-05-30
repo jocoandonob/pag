@@ -97,24 +97,23 @@ def generate_inpainting(prompt, init_image, mask_image, strength, pag_scale, gui
 
 def generate_controlnet(prompt, control_image, controlnet_scale, pag_scale, guidance_scale, num_inference_steps, seed):
     global pipeline_controlnet
+    device = get_device()
+    dtype = get_dtype(device)
     if pipeline_controlnet is None:
-        device = get_device()
         controlnet = ControlNetModel.from_pretrained(
             "diffusers/controlnet-canny-sdxl-1.0",
-            torch_dtype=get_dtype(device)
+            torch_dtype=dtype
         )
         pipeline_sdxl_controlnet = AutoPipelineForText2Image.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0",
             controlnet=controlnet,
-            torch_dtype=get_dtype(device)
-        )
-        pipeline_controlnet = AutoPipelineForText2Image.from_pipe(
-            pipeline_sdxl_controlnet,
             enable_pag=True,
-            pag_applied_layers=["mid"]
+            pag_applied_layers=["mid"],
+            torch_dtype=dtype
         )
         if device.type == "cuda":
-            pipeline_controlnet.enable_model_cpu_offload()
+            pipeline_sdxl_controlnet.enable_model_cpu_offload()
+        pipeline_controlnet = pipeline_sdxl_controlnet
     generator = torch.Generator(device="cpu").manual_seed(seed)
     images = pipeline_controlnet(
         prompt=prompt,
@@ -122,8 +121,8 @@ def generate_controlnet(prompt, control_image, controlnet_scale, pag_scale, guid
         controlnet_conditioning_scale=controlnet_scale,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
-        pag_scale=pag_scale,
         generator=generator,
+        pag_scale=pag_scale,
     ).images
     return images[0]
 
